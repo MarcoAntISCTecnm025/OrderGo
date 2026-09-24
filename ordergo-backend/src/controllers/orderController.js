@@ -22,7 +22,6 @@ const createOrder = async (req, res) => {
     try {
         const { customerName, customerPhone, deliveryAddress, items, totalAmount, isDineIn, paymentMethod } = req.body;
 
-        // Validación flexible: el teléfono y la dirección ya no son estrictamente obligatorios si es en local
         if (!customerName || !items || items.length === 0) {
             return res.status(400).json({ 
                 success: false, 
@@ -30,11 +29,10 @@ const createOrder = async (req, res) => {
             });
         }
 
-        // Buscar el último pedido registrado para calcular el siguiente número consecutivo
         const ordersRef = db.collection('orders');
         const snapshot = await ordersRef.orderBy('orderNumber', 'desc').limit(1).get();
         
-        let nextOrderNumber = 1001; // Número inicial si la colección está vacía
+        let nextOrderNumber = 1001;
         if (!snapshot.empty) {
             const lastOrder = snapshot.docs[0].data();
             if (lastOrder.orderNumber) {
@@ -42,7 +40,6 @@ const createOrder = async (req, res) => {
             }
         }
 
-        // Estructura de datos unificada para Firebase
         const orderPayload = {
             customerName,
             customerPhone: customerPhone || 'N/A',
@@ -89,14 +86,12 @@ const updateOrderStatus = async (req, res) => {
 
         await orderRef.update({ status });
 
-        // ⚡ Emitir evento en tiempo real si req.app.io está disponible
         if (req.app && req.app.io) {
             req.app.io.to(`order_${id}`).emit('order_status_updated', {
                 orderId: id,
                 status: status,
                 updatedAt: new Date().toISOString()
             });
-            // También podemos emitir una alerta general para el panel de administración
             req.app.io.emit('global_order_update', { orderId: id, status });
         }
 
@@ -109,8 +104,38 @@ const updateOrderStatus = async (req, res) => {
     }
 };
 
+// 4. Obtener reporte de ventas (Solo pedidos Entregados)
+const getSalesReport = async (req, res) => {
+    try {
+        const snapshot = await db.collection('orders').where('status', '==', 'Entregado').get();
+        
+        let totalRevenue = 0;
+        let totalOrders = 0;
+        const ordersList = [];
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            totalRevenue += Number(data.totalAmount) || 0;
+            totalOrders += 1;
+            ordersList.push({ id: doc.id, ...data });
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                totalRevenue: totalRevenue.toFixed(2),
+                totalOrders,
+                ordersList
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 module.exports = {
     getOrders,
     createOrder,
-    updateOrderStatus
+    updateOrderStatus,
+    getSalesReport,
 };
